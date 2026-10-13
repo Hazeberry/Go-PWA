@@ -3,7 +3,7 @@
    sofort aus dem Cache und wird im Hintergrund aktualisiert
    (stale-while-revalidate). Neue Versionen greifen beim nächsten Start.
    Bei Änderungen an den App-Dateien CACHE_VERSION erhöhen. */
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const APP_CACHE = `go-app-${CACHE_VERSION}`;
 
 const APP_FILES = [

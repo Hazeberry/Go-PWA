@@ -53,7 +53,9 @@ Dafür gibt es das Antippen.
 - Nach Spielende rechnete ein Wechsel des Wertungsmodus nicht neu. Behoben.
 
 **KI**
-- Aufgabe nur noch, wenn die KI auch nach Fläche (mit Komi, ohne beweisbar tote Steine) zurückliegt (`resignAreaMargin` = 0; −1 = altes Verhalten nur nach Q).
+- Aufgabe nur noch, wenn die KI auch auf der Einflusskarte zurückliegt: Gebiet inklusive offener Rahmen, mit Komi, ohne beweisbar tote Steine (`resignAreaMargin` = 0; −1 = altes Verhalten nur nach Q).
+  Grund: Q wird stark von Gefangenen bestimmt. In einer Partie gab die KI bei 23:6 Gefangenen auf (Q −0,98), obwohl sie mit einem großen offenen Rahmen auf der Einflusskarte etwa 250:85 vorn lag. Eine Probe, die nur geschlossene Gebiete zählt, hätte das nicht verhindert.
+  Hinweis: Eine niedrigere *Aufgabe-Q* (z. B. 0,90) lässt die KI früher aufgeben; die Flächenprobe bremst das nur, wenn die Einflusskarte nicht klar gegen die KI spricht.
 - Der taktische Leser beachtet jetzt Ko (kein sofortiger Rückschlag beim Lesen).
 - Pass-Schwellen sind gestuft: Ab Zug 41/81/121/151 gilt jeweils genau eine Schwelle. `passMinMc120` und `passMinMc150` wirken jetzt wirklich (Standard 20, damit das bisherige Verhalten gleich bleibt).
 - Die Spielphase richtet sich nach den echten freien Feldern statt nach der Zahl der Kandidatenzüge; KI und Gegner werden in derselben Phase bewertet.
@@ -87,7 +89,7 @@ python3 -m http.server 8000
 
 ## Updates
 
-Nach Änderungen an den App-Dateien `CACHE_VERSION` in `sw.js` erhöhen (aktuell `v3`).
+Nach Änderungen an den App-Dateien `CACHE_VERSION` in `sw.js` erhöhen (aktuell `v4`).
 Installierte Apps laden die neue Version im Hintergrund und zeigen sie beim nächsten Start.
 
 ## Lizenz
