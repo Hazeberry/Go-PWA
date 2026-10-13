@@ -289,27 +289,6 @@ function _diagIsTrueEye(board, candIdx, color) {
   return oppDiag <= (edge ? 0 : 1);
 }
 
-function findEyes(board, group, color) {
-  const eyes = [], candidates = new Map();
-  for (const g of group)
-    for (const n of NEIGHBORS[g])
-      if (board[n] === 0 && !candidates.has(n)) candidates.set(n, n);
-  for (const candIdx of candidates.keys()) {
-    let isEye = true, own = 0;
-    for (const n of NEIGHBORS[candIdx]) {
-      const cell = board[n];
-      if (cell === color || (cell === 0 && candidates.has(n))) own++;
-      else { isEye = false; break; }
-    }
-    const x = xOf(candIdx), y = yOf(candIdx);
-    const edge = x===0||x===SIZE-1||y===0||y===SIZE-1;
-    const corner = (x===0||x===SIZE-1)&&(y===0||y===SIZE-1);
-    if (isEye && own >= (corner?2:edge?3:4) && _diagIsTrueEye(board, candIdx, color))
-      eyes.push(candIdx);
-  }
-  return eyes;
-}
-
 const _bnChainId   = new Int32Array(BOARD_SIZE);
 const _bnRegionId  = new Int32Array(BOARD_SIZE);
 const _bnChainMark = new Int32Array(BOARD_SIZE);
@@ -430,7 +409,49 @@ function bensonClassify(board) {
   return epoch;
 }
 
-const AUGE_GROSS = 6, OFFEN_GROSS = 40;
+const AUGE_GROSS = 7, OFFEN_GROSS = 40, OFFEN_KLEIN = 5, OFFEN_ANTEIL = 0.2;
+
+function augenraumLebt(punkte, augeGross = AUGE_GROSS) {
+  const n = punkte.length;
+  if (n <= 3) return false;
+  if (n >= augeGross) return true;
+  const drin = new Set(punkte);
+  let maxGrad = 0, quadrat = false;
+  for (const p of punkte) {
+    let g = 0;
+    for (const q of NEIGHBORS[p]) if (drin.has(q)) g++;
+    if (g > maxGrad) maxGrad = g;
+    if (xOf(p) < SIZE - 1 && yOf(p) < SIZE - 1
+        && drin.has(p + 1) && drin.has(p + SIZE) && drin.has(p + SIZE + 1)) quadrat = true;
+  }
+  if (n === 4) return !(quadrat || maxGrad === 3);
+  if (n === 5) return !(quadrat || maxGrad === 4);
+  if (n === 6) return !(quadrat && maxGrad === 4);
+  return true;
+}
+
+function _sekiPruefen(b, V, farbe, reg, regionen) {
+  if (V.frei.size < 2) return false;
+  const opp = 3 - farbe, geteilt = [];
+  for (const L of V.frei) {
+    if (regionen[reg[L]].rand === farbe) continue;
+    let anGegner = false;
+    for (const n of NEIGHBORS[L]) if (b[n] === opp) { anGegner = true; break; }
+    if (!anGegner) return false;
+    geteilt.push(L);
+  }
+  if (!geteilt.length) return false;
+  const t = new Uint8Array(BOARD_SIZE);
+  for (const L of geteilt) {
+    for (const f of [farbe, opp]) {
+      t.set(b); t[L] = f;
+      if (removeDeadGroups(t, 3 - f, L) > 0) return false;
+      if (countLiberties(t, L, 2) >= 2) return false;
+    }
+  }
+  return true;
+}
+
 function toteSteineAmEnde(board, augeGross = AUGE_GROSS, offenGross = OFFEN_GROSS) {
   const N = BOARD_SIZE, tot = new Uint8Array(N);
   const ep = bensonClassify(board);
@@ -456,14 +477,26 @@ function toteSteineAmEnde(board, augeGross = AUGE_GROSS, offenGross = OFFEN_GROS
         if (!b[n]) { if (reg[n] < 0) { reg[n] = id; q.push(n); } }
         else rand |= b[n];
       }
-      regionen.push({groesse: q.length, rand, kette: -1});
+      regionen.push({groesse: q.length, rand, kette: -1, punkte: q, falsch: false, lebt: false});
+    }
+    for (const r of regionen) {
+      if (r.rand !== 1 && r.rand !== 2) continue;
+      if (r.groesse === 1) {
+        const p = r.punkte[0], ids = new Set();
+        for (const n of NEIGHBORS[p]) ids.add(kette[n]);
+        if (ids.size > 1 && !_diagIsTrueEye(b, p, r.rand)) r.falsch = true;
+      } else {
+        r.lebt = augenraumLebt(r.punkte, augeGross);
+      }
     }
     const vater = ketten.map((_, k) => k);
     const wurzel = k => { while (vater[k] !== k) k = vater[k] = vater[vater[k]]; return k; };
     const eins = (x, y) => { x = wurzel(x); y = wurzel(y); if (x !== y) vater[y] = x; };
     for (let i = 0; i < N; i++) {
       if (b[i]) continue;
-      const erste = [-1, -1, -1], r = regionen[reg[i]];
+      const r = regionen[reg[i]];
+      if (r.falsch) continue;
+      const erste = [-1, -1, -1];
       for (const n of NEIGHBORS[i]) {
         if (!b[n]) continue;
         const k = kette[n], f = b[n];
@@ -479,20 +512,34 @@ function toteSteineAmEnde(board, augeGross = AUGE_GROSS, offenGross = OFFEN_GROS
       V.ketten.push(k); V.steine += K.steine.length; if (K.benson) V.benson = true;
       for (const l of K.freiheiten) V.frei.add(l);
     }
+    for (const r of regionen) {
+      if (r.rand !== 3 || r.groesse < offenGross) continue;
+      const gesehen = new Set();
+      r.randSteine = [0, 0, 0];
+      for (const p of r.punkte) for (const n of NEIGHBORS[p])
+        if (b[n] && !gesehen.has(n)) { gesehen.add(n); r.randSteine[b[n]]++; }
+    }
     for (let i = 0; i < N; i++) {
       if (!b[i]) continue;
-      for (const n of NEIGHBORS[i]) if (!b[n] && regionen[reg[n]].rand === 3 && regionen[reg[n]].groesse >= offenGross) {
-        verb.get(wurzel(kette[i])).offen = true; break;
+      const V = verb.get(wurzel(kette[i]));
+      if (V.offen) continue;
+      for (const n of NEIGHBORS[i]) {
+        const r = regionen[reg[n]];
+        if (b[n] || r.rand !== 3 || r.groesse < offenGross) continue;
+        const f = b[i], anteil = r.randSteine[f] / (r.randSteine[1] + r.randSteine[2]);
+        if (V.steine > OFFEN_KLEIN || anteil >= OFFEN_ANTEIL) { V.offen = true; break; }
       }
     }
     for (const r of regionen) {
-      if ((r.rand !== 1 && r.rand !== 2) || r.kette < 0) continue;
+      if ((r.rand !== 1 && r.rand !== 2) || r.kette < 0 || r.falsch) continue;
       const V = verb.get(wurzel(r.kette));
-      V.augen++; if (r.groesse >= augeGross) V.gross = true;
+      V.augen++; if (r.lebt) V.gross = true;
     }
     let schwach = null;
     for (const V of verb.values()) {
       if (V.benson || V.augen >= 2 || V.gross || V.offen) continue;
+      const farbe = b[ketten[V.ketten[0]].steine[0]];
+      if (_sekiPruefen(b, V, farbe, reg, regionen)) continue;
       if (!schwach || V.augen < schwach.augen
           || (V.augen === schwach.augen && (V.frei.size < schwach.frei.size
               || (V.frei.size === schwach.frei.size && V.steine < schwach.steine)))) schwach = V;
@@ -572,8 +619,8 @@ globalThis.PARAMS = {
   passGainThreshold: 60,
   passMinMc40:      -50,
   passMinMc80:       20,
-  passMinMc120:       8,
-  passMinMc150:      10,
+  passMinMc120:      20,
+  passMinMc150:      20,
   augenSchutz:        2,
   passUnabwendbar:    1,
   gegnerWert:         0,
@@ -642,7 +689,7 @@ globalThis.PARAMS = {
   captureCap:       0,
   resignEnabled:  1,
   resignQ:        0.95,
-  resignAreaMargin: -1,
+  resignAreaMargin: 0,
   resignStreak:   5,
   resignMinMoves: 60,
   resignAllDeadStreak: 3,
@@ -1929,12 +1976,14 @@ function aufgabeGebiet(board, aiColor) {
           totEigen: tot[aiColor], totFremd: tot[opp]};
 }
 
+const AUFGABE_KOMI = 7.5;
 function gebietSagtVerloren(board, aiColor) {
   const marge = PARAMS.resignAreaMargin;
   _aufgabeQRufe++;
   if (marge < 0) return true;
-  const opp = aiColor === 1 ? 2 : 1;
-  const eigen = estimateArea(board, aiColor), fremd = estimateArea(board, opp);
+  const g = aufgabeGebiet(board, aiColor);
+  const eigen = g.eigen + (aiColor === 2 ? AUFGABE_KOMI : 0);
+  const fremd = g.fremd + (aiColor === 1 ? AUFGABE_KOMI : 0);
   const verloren = eigen < fremd - marge;
   if (!verloren) {
     _aufgabeGebietBlock++;
@@ -1947,11 +1996,12 @@ function gebietSagtVerloren(board, aiColor) {
 const LESE_TIEFE = 40, LESE_BUDGET = 4000;
 
 function _leseZug(b, i, f) {
-  if (b[i]) return null;
+  if (b[i] || i === b.ko) return null;
   const nb = new Uint8Array(b);
   nb[i] = f;
-  removeDeadGroups(nb, 3 - f, i);
+  const cap = removeDeadGroups(nb, 3 - f, i);
   if (countLiberties(nb, i, 1) === 0) return null;
+  nb.ko = koNachZug(nb, i, cap);
   return nb;
 }
 
@@ -2082,7 +2132,8 @@ function getAIMove(board, aiColor, histHashes, captures, mc, diff, reqId, koPoin
     if (!kept.length) {
       _allDeadStreak++;
       const opp = aiColor === 1 ? 2 : 1;
-      const zurueck = estimateArea(board, aiColor) < estimateArea(board, opp);
+      const zurueck = estimateArea(board, aiColor) + (aiColor === 2 ? AUFGABE_KOMI : 0)
+                    < estimateArea(board, opp) + (aiColor === 1 ? AUFGABE_KOMI : 0);
       if (PARAMS.resignEnabled >= 1 && mc >= PARAMS.resignMinMoves &&
           zurueck && _allDeadStreak >= PARAMS.resignAllDeadStreak)
         return {type:'resign', requestId:reqId,
@@ -2103,6 +2154,8 @@ function getAIMove(board, aiColor, histHashes, captures, mc, diff, reqId, koPoin
     if (ohne.length) legal = ohne;
   }
   const empty = legal.length;
+  let leer = 0;
+  for (let i = 0; i < BOARD_SIZE; i++) if (!board[i]) leer++;
   buildCrisisMap(board, aiColor);
   if (PARAMS.tsumegoSunkCost > 0) aktualisiereKrisenDauer(board, aiColor);
   primeAreaCache(board, aiColor);
@@ -2110,7 +2163,7 @@ function getAIMove(board, aiColor, histHashes, captures, mc, diff, reqId, koPoin
   if (PARAMS.endTieBreak > 0 || PARAMS.gebietZug > 0) primeEndTieBreak(board);
   if (PARAMS.raumGewicht > 0 || PARAMS.raumZug > 0) primeRaum(board);
   const mg = PARAMS.musterGewicht;
-  const scored = legal.map(m => ({m, score: evaluateMove(board, m.idx, aiColor, mc, empty)
+  const scored = legal.map(m => ({m, score: evaluateMove(board, m.idx, aiColor, mc, leer)
     + (mg > 0 ? mg * musterWert(board, m.idx, aiColor) : 0)}));
   scored.sort((a,b) => b.score - a.score);
   let _gegnerWerte = null;
@@ -2122,7 +2175,7 @@ function getAIMove(board, aiColor, histHashes, captures, mc, diff, reqId, koPoin
     _gegnerWerte = new Map();
     for (const s of scored) {
       if (!oppLegal.has(s.m.idx)) continue;
-      const v = evaluateMove(board, s.m.idx, opp, mc, oppLegal.size);
+      const v = evaluateMove(board, s.m.idx, opp, mc, leer);
       if (v > 0) _gegnerWerte.set(s.m.idx, PARAMS.gegnerWert * v);
     }
     buildCrisisMap(board, aiColor);
@@ -2171,11 +2224,13 @@ function getAIMove(board, aiColor, histHashes, captures, mc, diff, reqId, koPoin
   const best = scored[0].score;
 
   const PASS_GAIN_THRESHOLD = PARAMS.passGainThreshold;
-  const wantsToPass =
-    (mc > 40  && best < PARAMS.passMinMc40) ||
-    (mc > 80  && best < PARAMS.passMinMc80)  ||
-    (mc > 120 && best < PARAMS.passMinMc120)  ||
-    (best < PARAMS.passMinMc150 && mc > 150);
+  const passSchwelle =
+      mc > 150 ? PARAMS.passMinMc150
+    : mc > 120 ? PARAMS.passMinMc120
+    : mc > 80  ? PARAMS.passMinMc80
+    : mc > 40  ? PARAMS.passMinMc40
+    : -Infinity;
+  const wantsToPass = best < passSchwelle;
 
   if (!wantsToPass) { _infValid = false; _tbValid = false; }
 
@@ -2191,7 +2246,7 @@ function getAIMove(board, aiColor, histHashes, captures, mc, diff, reqId, koPoin
     let oppBest = -Infinity;
     const oppTop = [];
     for (const m of oppLegal) {
-      const sc = evaluateMove(board, m.idx, opp, mc, oppLegal.length);
+      const sc = evaluateMove(board, m.idx, opp, mc, leer);
       if (sc > oppBest) oppBest = sc;
       if (oppTop.length < 3 || sc > oppTop[oppTop.length - 1].sc) {
         oppTop.push({idx: m.idx, sc}); oppTop.sort((x, y) => y.sc - x.sc);
@@ -2200,7 +2255,7 @@ function getAIMove(board, aiColor, histHashes, captures, mc, diff, reqId, koPoin
     }
     const opponentGainsAlot = oppBest > PASS_GAIN_THRESHOLD;
     const unabwendbar = PARAMS.passUnabwendbar >= 1 && (ownInAtari || opponentGainsAlot)
-      && gegnerzugUnabwendbar(board, aiColor, scored, oppTop, mc, PASS_GAIN_THRESHOLD, oppLegal.length);
+      && gegnerzugUnabwendbar(board, aiColor, scored, oppTop, mc, PASS_GAIN_THRESHOLD, leer);
     _areaCacheValid = false;
     _infValid = false;
     _tbValid = false;
@@ -2309,7 +2364,7 @@ function getAIMove(board, aiColor, histHashes, captures, mc, diff, reqId, koPoin
       CAND = PARAMS.crisisCand; R = PARAMS.crisisRoll; D = PARAMS.crisisDepth;
     } else if (mc < PARAMS.openingMoves) {
       CAND = PARAMS.candOpen; R = PARAMS.rollOpen; D = PARAMS.depthOpen;
-    } else if (mc <= PARAMS.endgameMoves && empty >= PARAMS.endgameEmpty) {
+    } else if (mc <= PARAMS.endgameMoves && leer >= PARAMS.endgameEmpty) {
       const f = empty > 200 ? 1.0 : empty > 100 ? 1.4 : 1.8;
       CAND = Math.min(PARAMS.candMidMax, Math.round(PARAMS.candMid  * f));
       R    = Math.max(PARAMS.rollMidMin, Math.round(PARAMS.rollMid  * f));
@@ -2461,7 +2516,21 @@ function pass() {
   updateUndoButton();
 }
 
+function kiTrainingAbschliessen() {
+  if (!globalThis.policyNet || policyNet._trained || !state.gameOver) return;
+  if (!policyNet._gameBuffer || !policyNet._gameBuffer.length) return;
+  policyNet._trained = true;
+  let gewonnen;
+  if (state.resignedBy) gewonnen = state.resignedBy !== state.aiColor;
+  else {
+    const s = endWertung();
+    gewonnen = state.aiColor === 1 ? s.schwarz > s.weiss : s.weiss > s.schwarz;
+  }
+  policyNet.trainGame(gewonnen ? 1 : -1);
+}
+
 function resetGame() {
+  kiTrainingAbschliessen();
   cleanupWorker();
   state.workerDead = false;
   state.workerDeadReason = null;
@@ -2489,86 +2558,86 @@ function resolveLifeAndDeath() {
   state.deadStones = new Set();
   const tot = toteSteineAmEnde(state.board);
   for (let i = 0; i < BOARD_SIZE; i++) if (tot[i]) state.deadStones.add(i);
-  for (const i of state.deadStones) {
-    const color = state.board[i];
-    state.board[i] = 0;
-    if (color) state.captures[color === 1 ? 2 : 1]++;
-  }
-  if (state.deadStones.size) {
-    state.log.push(`! ${state.deadStones.size} tote Steine entfernt`);
-    drawStateToCache();
-  }
+  if (state.deadStones.size)
+    state.log.push(`! ${state.deadStones.size} Steine als tot markiert (antippen zum Ändern)`);
+  drawStateToCache();
 }
 
-function finalAreaScore() {
-  const area = {1:0, 2:0}, visited = new Uint8Array(BOARD_SIZE);
-  for (let i = 0; i < BOARD_SIZE; i++) if (state.board[i]) area[state.board[i]]++;
+function endBrett() {
+  const board = cloneBoard(state.board), captures = {...state.captures};
+  for (const i of state.deadStones) {
+    const c = board[i];
+    if (!c) continue;
+    board[i] = 0;
+    captures[c === 1 ? 2 : 1]++;
+  }
+  return {board, captures};
+}
+
+function _gebiete(board) {
+  const gebiet = {1:0, 2:0}, visited = new Uint8Array(BOARD_SIZE);
   for (let i = 0; i < BOARD_SIZE; i++) {
-    if (state.board[i] || visited[i]) continue;
-    const region = [], queue = [i], borders = new Set();
+    if (board[i] || visited[i]) continue;
+    const queue = [i], borders = new Set();
     let head = 0; visited[i] = 1;
     while (head < queue.length) {
-      const c = queue[head++]; region.push(c);
+      const c = queue[head++];
       for (const n of NEIGHBORS[c]) {
-        const cell = state.board[n];
+        const cell = board[n];
         if (!cell) { if (!visited[n]) { visited[n] = 1; queue.push(n); } }
         else borders.add(cell);
       }
     }
-    if (borders.size === 1) area[[...borders][0]] += region.length;
+    if (borders.size === 1) gebiet[[...borders][0]] += queue.length;
   }
+  return gebiet;
+}
+
+function finalAreaScore() {
+  const {board} = endBrett(), area = _gebiete(board);
+  for (let i = 0; i < BOARD_SIZE; i++) if (board[i]) area[board[i]]++;
   return area;
 }
 
 function finalTerritoryScore() {
-  const territory = {1: state.captures[1], 2: state.captures[2]};
-  const visited = new Uint8Array(BOARD_SIZE);
-  for (let i = 0; i < BOARD_SIZE; i++) {
-    if (state.board[i] || visited[i]) continue;
-    const region = [], queue = [i], borders = new Set();
-    let head = 0; visited[i] = 1;
-    while (head < queue.length) {
-      const c = queue[head++]; region.push(c);
-      for (const n of NEIGHBORS[c]) {
-        const cell = state.board[n];
-        if (!cell) { if (!visited[n]) { visited[n] = 1; queue.push(n); } }
-        else borders.add(cell);
-      }
-    }
-    if (borders.size === 1) territory[[...borders][0]] += region.length;
-  }
-  return territory;
+  const {board, captures} = endBrett(), gebiet = _gebiete(board);
+  return {1: gebiet[1] + captures[1], 2: gebiet[2] + captures[2]};
+}
+
+function endWertung() {
+  const territory = state.scoringMode === 'territory';
+  const t = territory ? finalTerritoryScore() : finalAreaScore();
+  return {schwarz: t[1], weiss: t[2] + KOMI,
+          label: territory ? 'Territory (Komi 7.5)' : 'Area (Komi 7.5)'};
 }
 
 function showFinalScore() {
-  let scoreB, scoreW, winner, diff, label;
-  if (state.scoringMode === 'territory') {
-    const t = finalTerritoryScore();
-    scoreB = t[1]; scoreW = t[2] + KOMI;
-    label = 'Territory (Komi 7.5)';
-  } else {
-    const a = finalAreaScore();
-    scoreB = a[1]; scoreW = a[2] + KOMI;
-    label = 'Area (Komi 7.5)';
-  }
-  diff = Math.abs(scoreB - scoreW);
-  winner = scoreB > scoreW ? 'Schwarz' : 'Weiß';
-  state.finalMargin = `${winner} +${diff.toFixed(1)}`;
-  document.getElementById('final-label').textContent = label;
+  const w = endWertung();
+  const winner = w.schwarz > w.weiss ? 'Schwarz' : 'Weiß';
+  state.finalMargin = `${winner} +${Math.abs(w.schwarz - w.weiss).toFixed(1)}`;
+  document.getElementById('final-label').textContent = w.label;
   document.getElementById('final-score').textContent = state.finalMargin;
   document.getElementById('territory-panel').style.display = 'flex';
-  if (globalThis.policyNet && !policyNet._trained) {
-    policyNet._trained = true;
-    const _a = finalAreaScore(), _ac = state.aiColor;
-    const _ai = _ac===1 ? _a[1] : _a[2]+KOMI, _op = _ac===1 ? _a[2]+KOMI : _a[1];
-    policyNet.trainGame(_ai > _op ? 1 : -1);
-  }
+}
+
+function zaehlPhase() {
+  return state.gameOver && !state.resignedBy && state.consecutivePasses >= 2;
+}
+
+function toteKetteUmschalten(i) {
+  if (!state.board[i]) return false;
+  const {group} = floodFill(state.board, i);
+  const warTot = state.deadStones.has(i);
+  for (const g of group) { if (warTot) state.deadStones.delete(g); else state.deadStones.add(g); }
+  showFinalScore();
+  drawStateToCache();
+  return true;
 }
 
 function applyAIResult(result, reqId, netInp, netPriors, netHidden) {
   if (!result || reqId !== state.aiRequestId) return;
-  if (state.gameOver || state.currentPlayer !== state.aiColor) {
-    state.aiThinking = false; updateAIStatus(); return;
+  if (!state.aiEnabled || state.gameOver || state.currentPlayer !== state.aiColor) {
+    state.aiThinking = false; updateAIStatus(); updateUndoButton(); return;
   }
   if (result.type === 'stone') {
     const r = placeStone(result.x, result.y);
@@ -2592,15 +2661,11 @@ function applyAIResult(result, reqId, netInp, netPriors, netHidden) {
     const kiName = state.aiColor === 1 ? '● Schwarz' : '○ Weiß';
     state.log.push(`— ${kiName} (KI) gibt auf —`);
     if (result.info) state.log.push(`   ↳ ${result.info}`);
-    const _bSave = cloneBoard(state.board);
-    const _cSave = {...state.captures};
-    const _dSave = state.deadStones;
     const _logLen = state.log.length;
-    if (globalThis.policyNet && !policyNet._trained) { policyNet._trained = true; policyNet.trainGame(-1); }
     resolveLifeAndDeath();
     showFinalScore();
     const stand = state.finalMargin;
-    state.board = _bSave; state.captures = _cSave; state.deadStones = _dSave;
+    state.deadStones = new Set();
     state.log.length = _logLen;
     drawStateToCache();
     const gewinner = state.aiColor === 1 ? 'Weiß' : 'Schwarz';
@@ -2834,7 +2899,7 @@ function triggerAIMove() {
   } else {
     setTimeout(() => {
       if (reqId !== state.aiRequestId) return;
-      if (state.gameOver || state.currentPlayer !== state.aiColor) {
+      if (!state.aiEnabled || state.gameOver || state.currentPlayer !== state.aiColor) {
         state.aiThinking = false; updateAIStatus(); return;
       }
       state.aiReqT0 = Date.now();
@@ -2962,7 +3027,7 @@ function generateGrain() {
 
 function drawBoardToCache() {
   const {MARGIN:M, CELL:C, S} = layout, c = bCtx;
-  c.drawImage(grainCanvas, 0, 0);
+  c.drawImage(grainCanvas, 0, 0, S, S);
   c.strokeStyle = '#5a3a10'; c.lineWidth = 0.8;
   for (let i = 0; i < SIZE; i++) {
     const p = M + i*C;
@@ -2987,6 +3052,8 @@ function drawBoardToCache() {
 
 function drawStoneTo(ct, x, y, color, isDead) {
   const {MARGIN:M, CELL:C} = layout, cx = M+x*C, cy = M+y*C, r = C*0.46;
+  ct.save();
+  if (isDead) ct.globalAlpha = 0.45;
   ct.beginPath(); ct.arc(cx, cy, r, 0, Math.PI*2);
   if (color === 1) {
     const g = ct.createRadialGradient(cx-r*.3, cy-r*.3, r*.05, cx, cy, r);
@@ -3007,14 +3074,16 @@ function drawStoneTo(ct, x, y, color, isDead) {
     ct.fillStyle='rgba(255,255,255,.7)'; ct.fill();
   }
   if (isDead) {
-    ct.strokeStyle='#c0392b'; ct.lineWidth=3; ct.beginPath();
+    ct.globalAlpha = 1;
+    ct.strokeStyle='#c0392b'; ct.lineWidth=Math.max(2, C*0.09); ct.beginPath();
     ct.moveTo(cx-r*.6,cy-r*.6); ct.lineTo(cx+r*.6,cy+r*.6);
     ct.moveTo(cx+r*.6,cy-r*.6); ct.lineTo(cx-r*.6,cy+r*.6); ct.stroke();
   }
+  ct.restore();
 }
 
 function drawStateToCache() {
-  sCtx.drawImage(boardCache, 0, 0);
+  sCtx.drawImage(boardCache, 0, 0, layout.S, layout.S);
   for (let i = 0; i < BOARD_SIZE; i++)
     if (state.board[i]) drawStoneTo(sCtx, xOf(i), yOf(i), state.board[i], state.deadStones.has(i));
   const lm = state.lastMove;
@@ -3030,14 +3099,17 @@ function drawStateToCache() {
 
 function resizeCanvas() {
   layout = computeLayout();
-  canvas.width = canvas.height = layout.S;
-  boardCache.width = boardCache.height = layout.S;
-  stateCache.width = stateCache.height = layout.S;
+  const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1)), px = Math.round(layout.S * dpr);
+  canvas.width = canvas.height = px;
+  canvas.style.width = canvas.style.height = layout.S + 'px';
+  boardCache.width = boardCache.height = px;
+  stateCache.width = stateCache.height = px;
+  for (const c of [ctx, bCtx, sCtx]) c.setTransform(dpr, 0, 0, dpr, 0, 0);
   generateGrain(); drawBoardToCache(); drawStateToCache();
 }
 resizeCanvas();
 
-function render() { ctx.drawImage(stateCache, 0, 0); }
+function render() { ctx.drawImage(stateCache, 0, 0, layout.S, layout.S); }
 
 function drawGhost(col, row) {
   const {MARGIN:M, CELL:C} = layout;
@@ -3068,7 +3140,9 @@ function updateUI(msg='') {
   const isB = state.currentPlayer===1;
   elStone.className=isB?'black':'white'; elLabel.textContent=isB?'Schwarz':'Weiß';
   elCapB.textContent=state.captures[1]; elCapW.textContent=state.captures[2];
-  elMsg.textContent=state.gameOver?'Spiel beendet':(msg||'–');
+  elMsg.textContent=state.gameOver
+    ?(msg||(zaehlPhase()?'Spiel beendet · tote Steine antippen zum Ändern':'Spiel beendet'))
+    :(msg||'–');
   elLog.textContent = '';
   for (const l of state.log.slice(-40)) {
     const d = document.createElement('div');
@@ -3088,8 +3162,8 @@ function updateAIStatus() {
 
 function eventToBoard(e, hitRadius) {
   const rect=canvas.getBoundingClientRect();
-  const mx=(e.clientX-rect.left)*(canvas.width/rect.width);
-  const my=(e.clientY-rect.top)*(canvas.height/rect.height);
+  const mx=(e.clientX-rect.left)*(layout.S/rect.width);
+  const my=(e.clientY-rect.top)*(layout.S/rect.height);
   const{MARGIN:M,CELL:C}=layout;
   const col=Math.round((mx-M)/C),row=Math.round((my-M)/C);
   if(col<0||col>=SIZE||row<0||row>=SIZE)return null;
@@ -3103,6 +3177,15 @@ function commitMove(col,row){
 }
 
 canvas.addEventListener('pointerup', e => {
+  if(zaehlPhase()){
+    if(e.pointerType==='mouse'&&e.button!==0)return;
+    const p=eventToBoard(e, e.pointerType!=='mouse'?0.68:0.48);
+    if(p&&toteKetteUmschalten(idx(p.col,p.row))){
+      render();
+      updateUI(`Wertung: ${state.finalMargin} · ${state.deadStones.size} tote Steine`);
+    }
+    return;
+  }
   if(state.gameOver||!humanTurn())return;
   if(e.pointerType==='mouse'&&e.button!==0)return;
   const isTouch = e.pointerType!=='mouse';
@@ -3124,8 +3207,8 @@ canvas.addEventListener('pointerup', e => {
 canvas.addEventListener('mousemove', e => {
   if(state.gameOver||!humanTurn()||pendingTouch)return;
   const rect=canvas.getBoundingClientRect();
-  const mx=(e.clientX-rect.left)*(canvas.width/rect.width);
-  const my=(e.clientY-rect.top)*(canvas.height/rect.height);
+  const mx=(e.clientX-rect.left)*(layout.S/rect.width);
+  const my=(e.clientY-rect.top)*(layout.S/rect.height);
   const{MARGIN:M,CELL:C}=layout;
   const col=Math.round((mx-M)/C),row=Math.round((my-M)/C);
   render();
@@ -3138,6 +3221,7 @@ canvas.addEventListener('mouseleave',()=>{
 
 document.getElementById('btn-ai-toggle').addEventListener('click',function(){
   state.aiEnabled=!state.aiEnabled;
+  if(!state.aiEnabled&&state.aiThinking){state.aiRequestId++;state.aiThinking=false;updateUndoButton();}
   this.textContent=state.aiEnabled?'KI deaktivieren':'KI aktivieren';
   this.classList.toggle('active-mode',state.aiEnabled);
   updateAIStatus();
@@ -3159,11 +3243,12 @@ document.querySelectorAll('.color-btn').forEach(btn=>btn.addEventListener('click
 document.querySelectorAll('.scoring-btn').forEach(btn=>btn.addEventListener('click',function(){
   document.querySelectorAll('.scoring-btn').forEach(b=>b.classList.remove('active'));
   this.classList.add('active');state.scoringMode=this.dataset.scoring;
+  if(zaehlPhase()){showFinalScore();updateUI();}
 }));
 
 document.getElementById('btn-pass').addEventListener('click',()=>{
   if(state.gameOver||!humanTurn())return;
-  pass();render();updateUI(state.gameOver?'Beide gepasst.':'');
+  pass();render();updateUI();
   if(!state.gameOver&&!humanTurn())triggerAIMove();
 });
 
@@ -3178,19 +3263,27 @@ document.getElementById('btn-reset').addEventListener('click',()=>{
 });
 
 function copyWithFeedback(text, btnId, idleLabel) {
-  const done = () => {
+  const zeige = ok => {
     const btn = document.getElementById(btnId);
-    btn.textContent = '✓'; btn.style.color = 'var(--green)';
+    if (!btn) return;
+    btn.textContent = ok ? '✓' : '✗';
+    btn.style.color = ok ? 'var(--green)' : 'var(--red)';
     setTimeout(() => { btn.textContent = idleLabel; btn.style.color = ''; }, 1500);
   };
-  navigator.clipboard.writeText(text).then(done).catch(() => {
-    const ta = document.createElement('textarea');
-    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-    document.body.appendChild(ta); ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    done();
-  });
+  const ersatz = () => {
+    let ok = false;
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch (e) { ok = false; }
+    zeige(ok);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(text).then(() => zeige(true), ersatz);
+  else ersatz();
 }
 
 document.getElementById('btn-sgf').addEventListener('click', downloadSGF);
@@ -3220,6 +3313,7 @@ function buildBugReport() {
       spielVorbei: state.gameOver,
       koPoint:    state.koPoint,
       gefangene:  {...state.captures},
+      toteSteine: [...state.deadStones].map(i => coordToLabel(xOf(i), yOf(i))),
       msProSim:   typeof _lastMsPerSim === 'number' ? Math.round(_lastMsPerSim * 100) / 100 : null
     },
     brett: rows,
@@ -3232,6 +3326,7 @@ function buildBugReport() {
 document.getElementById('btn-bug-report').addEventListener('click', () => {
   copyWithFeedback(buildBugReport(), 'btn-bug-report', '🐞');
 });
+window.addEventListener('pagehide', kiTrainingAbschliessen);
 render();updateUI();updateAIStatus();updateUndoButton();
 </script>
 <script id="policy-net">
@@ -3770,7 +3865,7 @@ globalThis.policyNet = new PolicyNet();
         {key:'openingMoves',    label:'Eröffnung ≤ Zug',   step:1,   min:5,   max:60,
          tip:'↑ = längere territoriale Eröffnungsphase'},
         {key:'endgameMoves',    label:'Endspiel ≥ Zug',    step:1,   min:20,  max:200,
-         tip:'↓ = früher Gebiets-Denken (Area-Scoring). Gemessen: 150 statt 80 gewinnt nur 31 % (docs/endspielgrenze.md).'},
+         tip:'↓ = früher Gebiets-Denken (Area-Scoring). Gemessen: 150 statt 80 gewinnt nur 31 %.'},
         {key:'endgameEmpty',    label:'Endspiel ≤ Frei',   step:1,   min:10,  max:150,
          tip:'↓ = schaltet noch früher in Endspiel-Modus'},
       ]
@@ -3886,17 +3981,21 @@ globalThis.policyNet = new PolicyNet();
         {key:'passMinMc40',       label:'Pass mc>40',       step:5,   min:-200,max:100,
          tip:'Früh-Pass: wenn best < X → Pass-Kandidat'},
         {key:'passMinMc80',       label:'Pass mc>80',       step:5,   min:-100,max:100,
-         tip:'Mittelspiel-Pass-Schwelle'},
+         tip:'Mittelspiel-Pass-Schwelle (gilt ab Zug 81 bis 120)'},
+        {key:'passMinMc120',      label:'Pass mc>120',      step:1,   min:-100,max:100,
+         tip:'Pass-Schwelle ab Zug 121. Jede Stufe gilt allein; Standard 20 wie mc>80.'},
+        {key:'passMinMc150',      label:'Pass mc>150',      step:1,   min:-100,max:100,
+         tip:'Pass-Schwelle ab Zug 151. Standard 20.'},
         {key:'leseRettung',       label:'Lese-Rettung',     step:1,   min:0,   max:2,
-         tip:'1 = ein taktischer Leser prüft eigene gefährdete Ketten (bis 3 Freiheiten) und spielt nachweislich rettende Züge bevorzugt. Selbstspiel 62,8 % und 58,1 %, gegen GNU Go aber −30,5 und, ausgespielt, −6,3 Punkte — kein Default. 2 = zusätzlich Fangen. Siehe docs/laufkampf-lesen.md.'},
+         tip:'1 = ein taktischer Leser prüft eigene gefährdete Ketten (bis 3 Freiheiten) und spielt nachweislich rettende Züge bevorzugt. Selbstspiel 62,8 % und 58,1 %, gegen GNU Go aber −30,5 und, ausgespielt, −6,3 Punkte — kein Default. 2 = zusätzlich Fangen.'},
         {key:'leseVerzicht',      label:'Lese-Verzicht',    step:1,   min:0,   max:1,
-         tip:'1 = keine Züge, deren eigene Kette der taktische Leser sofort fangen kann (außer Schlag oder Atari), Default. Gegen GNU Go +56 Punkte, im Selbstspiel 72,8 %. 0 = altes Verhalten. Siehe docs/endspiel-verlust.md.'},
+         tip:'1 = keine Züge, deren eigene Kette der taktische Leser sofort fangen kann (außer Schlag oder Atari), Default. Gegen GNU Go +56 Punkte, im Selbstspiel 72,8 %. 0 = altes Verhalten.'},
         {key:'atariVerzicht',     label:'Atari-Verzicht',   step:1,   min:0,   max:1,
-         tip:'1 = auch ein Atari fällt unter den Lese-Verzicht, wenn der Leser die eigene Kette danach fängt und das Ziel entkommt. Ein Einwurf mit Snapback bleibt erlaubt. Nur mit Lese-Verzicht. Gegen GNU Go +2,4 Punkte, im Selbstspiel 50,6 %, beides nicht signifikant — kein Default. Siehe docs/atari-verschenkt.md.'},
+         tip:'1 = auch ein Atari fällt unter den Lese-Verzicht, wenn der Leser die eigene Kette danach fängt und das Ziel entkommt. Ein Einwurf mit Snapback bleibt erlaubt. Nur mit Lese-Verzicht. Gegen GNU Go +2,4 Punkte, im Selbstspiel 50,6 %, beides nicht signifikant — kein Default.'},
         {key:'quickRettung',      label:'Rettung in der Suche', step:1, min:0,   max:1,
-         tip:'1 = die schnelle Bewertung in Suche und Rollouts belohnt einen Zug an eine schwache eigene Kette nur, wenn die Kette danach mindestens drei Freiheiten hat. Gegen GNU Go −14,9 Punkte, im Selbstspiel 51,9 %, beides nicht signifikant — kein Default. Siehe docs/quick-rettung.md.'},
+         tip:'1 = die schnelle Bewertung in Suche und Rollouts belohnt einen Zug an eine schwache eigene Kette nur, wenn die Kette danach mindestens drei Freiheiten hat. Gegen GNU Go −14,9 Punkte, im Selbstspiel 51,9 %, beides nicht signifikant — kein Default.'},
         {key:'wurzelFrisch',      label:'Frische Wurzel',   step:1,   min:0,   max:1,
-         tip:'1 = bei wiederverwendetem Suchbaum kommen die Kandidaten an der Wurzel trotzdem aus der vollen Zugbewertung; was der alte Baum über diese Züge weiß, bleibt erhalten (Default). Gegen GNU Go +26 Punkte, im Selbstspiel 55 %. 0 = Kandidaten aus dem alten Baum. Siehe docs/wurzel-frisch.md.'},
+         tip:'1 = bei wiederverwendetem Suchbaum kommen die Kandidaten an der Wurzel trotzdem aus der vollen Zugbewertung; was der alte Baum über diese Züge weiß, bleibt erhalten (Default). Gegen GNU Go +26 Punkte, im Selbstspiel 55 %. 0 = Kandidaten aus dem alten Baum.'},
         {key:'augenSchutz',       label:'Augenschutz',      step:1,   min:0,   max:2,
          tip:'Nie ein eigenes echtes Auge füllen. 1 = beim eigenen Zug, 2 = auch in der Suche (Default). Gegen GNU Go +217 Punkte im Endstand. 0 = altes Verhalten.'},
         {key:'passUnabwendbar',   label:'Pass trotz Drohung', step:1, min:0,   max:1,
@@ -3922,9 +4021,9 @@ globalThis.policyNet = new PolicyNet();
         {key:'gebietZug', label:'Gebiet je Zug', step:10, min:0, max:300,
          tip:'Bewertet Züge nach ihrer Wirkung auf die Einflusskarte (eigene minus fremde Zone), in allen Phasen — gegen den Mauerbau. Default 80: gegen GNU Go +229 Punkte nach 120 Zügen, im Selbstspiel 83 % Siegrate. 0 = altes Verhalten.'},
         {key:'musterGewicht', label:'Muster (GNU Go)', step:100, min:0, max:3200,
-         tip:'Gewicht der Muster aus GNU-Go-Zügen: 3×3-Umgebung, Abstand zum letzten Zug, Linie. Die Muster sagen GNU Gos Zug in 15–20 % der Stellungen voraus, die Zugbewertung in unter 2 %. Default 200: gegen GNU Go +103 Punkte, im Selbstspiel 98,6 %. 0 = aus. Siehe docs/muster.md.'},
+         tip:'Gewicht der Muster aus GNU-Go-Zügen: 3×3-Umgebung, Abstand zum letzten Zug, Linie. Die Muster sagen GNU Gos Zug in 15–20 % der Stellungen voraus, die Zugbewertung in unter 2 %. Default 200: gegen GNU Go +103 Punkte, im Selbstspiel 98,6 %. 0 = aus.'},
         {key:'gebietFreiheit', label:'Gebiet nach Freiheiten', step:1, min:0, max:1,
-         tip:'1 = der Gebietsgewinn eines Zuges zählt nur anteilig, wenn seine Kette danach wenige Freiheiten hat (2: ein Viertel, 3: 60 %). Gegen GNU Go +19,5 Punkte, im Selbstspiel 53,6 %; nachgemessen +8,9 und 45,6 %, alles nicht signifikant — kein Default. Siehe docs/gebiet-freiheit.md.'},
+         tip:'1 = der Gebietsgewinn eines Zuges zählt nur anteilig, wenn seine Kette danach wenige Freiheiten hat (2: ein Viertel, 3: 60 %). Gegen GNU Go +19,5 Punkte, im Selbstspiel 53,6 %; nachgemessen +8,9 und 45,6 %, alles nicht signifikant — kein Default.'},
         {key:'gebietGewicht', label:'Gebiet in der Stellung', step:1, min:0, max:20,
          tip:'EXPERIMENTELL. Zählt die Einflussbilanz in jeder Blattbewertung mit. Im Pilot ohne Wirkung. Default 0 = aus.'},
         {key:'raumZug', label:'Raumrisiko je Zug', step:0.5, min:0, max:3,
@@ -3936,9 +4035,11 @@ globalThis.policyNet = new PolicyNet();
         {key:'bensonMoveFilter', label:'Benson-Filter', step:1, min:0, max:1,
          tip:'1 = todgeborene Züge (beweisbar toter Stein) fliegen aus der Kandidatenliste; nur Pass bleibt, wenn nichts übrig ist'},
         {key:'captureCap', label:'Gefangenen-Deckel', step:50, min:0, max:1000,
-         tip:'0 = aus. Begrenzt, wie weit der Gefangenen-Saldo die Bewertung beherrschen darf. 200: im Selbstspiel 54 % über 1 440 Partien und halb so viele falsche Aufgaben — knapp nicht als Default beschlossen (docs/aufgabe-deckel.md). Wer die KI nach vielen geschlagenen Steinen nicht aufgeben sehen will: 200.'},
+         tip:'0 = aus. Begrenzt, wie weit der Gefangenen-Saldo die Bewertung beherrschen darf. 200: im Selbstspiel 54 % über 1 440 Partien und halb so viele falsche Aufgaben — knapp nicht als Default beschlossen. Wer die KI nach vielen geschlagenen Steinen nicht aufgeben sehen will: 200.'},
         {key:'resignQ', label:'Aufgabe-Q', step:0.01, min:0.5, max:1, float:true,
          tip:'Q-Schwelle (aus KI-Sicht negativ) für die Aufgabe-Serie'},
+        {key:'resignAreaMargin', label:'Aufgabe-Flächenprobe', step:1, min:-1, max:100,
+         tip:'Die KI gibt nur auf, wenn sie zusätzlich nach Fläche (mit Komi, ohne beweisbar tote Steine) um mehr als diesen Wert zurückliegt. 0 = Standard. −1 = ohne Flächenprobe, nur nach Q (altes Verhalten).'},
         {key:'resignStreak', label:'Aufgabe-Serie', step:1, min:2, max:20,
          tip:'So viele KI-Züge in Folge mit Q ≤ -Schwelle → KI gibt auf. resignEnabled=0 in PARAMS schaltet ab.'},
         {key:'adaptiveBudgetTargetMinSims', label:'Ziel-Min-Sims', step:10, min:20, max:300, main:true,
@@ -3977,7 +4078,7 @@ globalThis.policyNet = new PolicyNet();
     },
     {
       id:'polnet', label:'🧠 Policy-Netz',
-      hint:'3971→128→361 Netz, REINFORCE. Score = (1−blend)·MoE + blend·Prior·scale. Blend wächst automatisch: nach 5 Spielen ~30% Einfluss. Gewichte in localStorage. Gradienten-Deckel 0 = aus — dann divergiert das Training (siehe Kommentar bei netGradClip).',
+      hint:'3971→128→361 Netz, REINFORCE. Score = (1−blend)·MoE + blend·Prior·scale. Der Einfluss wächst über die Warmup-Spiele bis „Max. Einfluss“ (Standard 0: das Netz lernt nur mit und steuert nicht). Gewichte in localStorage. Gradienten-Deckel 0 = aus — dann divergiert das Training.',
       custom:'pnet'
     },
   ];
@@ -4111,13 +4212,14 @@ globalThis.policyNet = new PolicyNet();
   html += `
       <div class="pd-reset-row">
         <button class="pd-reset-btn" onclick="dashReset()">↺ Reset</button>
-        <button class="pd-export-btn" onclick="dashSave()">💾 Speichern</button>
-        <button class="pd-export-btn" onclick="dashExport()">⬇ Export</button>
+        <button class="pd-export-btn" id="pd-save-btn" onclick="dashSave()">💾 Speichern</button>
+        <button class="pd-export-btn" id="pd-export-btn" onclick="dashExport()">⬇ Export</button>
       </div>
     </div>`;
 
   panel.innerHTML = html;
   sidebar.appendChild(panel);
+  dashSyncInputs();
 
   const PRESETS = {
     ausgeglichen: {
@@ -4132,8 +4234,6 @@ globalThis.policyNet = new PolicyNet();
         passGainThreshold: 65,
         endAreaGain:       26,
         endCapBonus:       12,
-        passMinMc120:       6,
-        passMinMc150:       8,
       }
     },
     aggressiv: {
@@ -4178,19 +4278,22 @@ globalThis.policyNet = new PolicyNet();
     if (preset.values === null) {
       dashReset();
     } else {
-      Object.assign(PARAMS, preset.values);
-      for (const [k,v] of Object.entries(preset.values)) {
-        const inp = document.getElementById('pd-' + k);
-        if (inp) {
-          inp.value = v;
-          inp.classList.toggle('changed', Math.abs(v - PARAMS_DEFAULT[k]) > 1e-9);
-        }
-      }
+      Object.assign(PARAMS, PARAMS_DEFAULT, preset.values);
+      dashSyncInputs();
     }
     document.querySelectorAll('.pd-preset-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('pd-preset-' + name)?.classList.add('active');
     dashRefreshPhase();
   };
+
+  function dashSyncInputs() {
+    for (const key of Object.keys(PARAMS_DEFAULT)) {
+      const inp = document.getElementById('pd-' + key);
+      if (!inp) continue;
+      inp.value = PARAMS[key];
+      inp.classList.toggle('changed', Math.abs(PARAMS[key] - PARAMS_DEFAULT[key]) > 1e-9);
+    }
+  }
 
   window.dashToggle = function() {
     const body = document.getElementById('pdash-body');
@@ -4281,8 +4384,8 @@ globalThis.policyNet = new PolicyNet();
     let ok = true;
     try { localStorage.setItem(PD_STORE, JSON.stringify({version: PD_VERSION, abweichungen: dashAbweichungen()})); }
     catch (e) { console.warn('[Dashboard] Speichern fehlgeschlagen:', e); ok = false; }
-    const btn = document.querySelectorAll('.pd-export-btn')[0];
-    const orig = btn.textContent;
+    const btn = document.getElementById('pd-save-btn');
+    const orig = '💾 Speichern';
     btn.textContent = ok ? '✓ Gespeichert' : '✗ Fehler';
     btn.style.color = ok ? 'var(--green)' : 'var(--red)';
     setTimeout(() => { btn.textContent = orig; btn.style.color = ''; }, 1500);
@@ -4336,12 +4439,7 @@ globalThis.policyNet = new PolicyNet();
     ];
     for (const [k,v] of Object.entries(PARAMS)) lines.push(`  ${k}: ${v},`);
     lines.push('};');
-    const txt = lines.join('\n');
-    navigator.clipboard.writeText(txt).catch(()=>{});
-    const btn = document.querySelector('.pd-export-btn');
-    const orig = btn.textContent;
-    btn.textContent = '✓ Kopiert'; btn.style.color='var(--green)';
-    setTimeout(()=>{ btn.textContent=orig; btn.style.color=''; },1500);
+    copyWithFeedback(lines.join('\n'), 'pd-export-btn', '⬇ Export');
   };
 
   const origUpdateUI = window.updateUI;
