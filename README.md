@@ -9,7 +9,7 @@ https://hazeberry.github.io/Go-PWA/
 | --- | --- |
 | `index.html` | Das Spiel (Brett, KI, Dashboard) |
 | `manifest.webmanifest` | Name, Farben und Icons für die Installation |
-| `sw.js` | Service Worker: speichert App und Schriften für den Offline-Betrieb |
+| `sw.js` | Service Worker: speichert die App für den Offline-Betrieb |
 | `icons/` | App-Icons (SVG-Vorlage plus PNGs) |
 
 ## Veröffentlichen
