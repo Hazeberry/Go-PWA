@@ -1977,11 +1977,21 @@ function aufgabeGebiet(board, aiColor) {
 }
 
 const AUFGABE_KOMI = 7.5;
+const _aeBrett = new Uint8Array(BOARD_SIZE), _aeA = new Int32Array(BOARD_SIZE), _aeB = new Int32Array(BOARD_SIZE);
+function aufgabeEinfluss(board, aiColor) {
+  _aeBrett.set(board);
+  const ep = bensonClassify(_aeBrett);
+  for (let i = 0; i < BOARD_SIZE; i++) if (_aeBrett[i] && _bnDead[i] === ep) _aeBrett[i] = 0;
+  const z = bouzyKarte(_aeBrett, _aeA, _aeB);
+  let schwarz = 0, weiss = 0;
+  for (let i = 0; i < BOARD_SIZE; i++) { if (z[i] > 0) schwarz++; else if (z[i] < 0) weiss++; }
+  return aiColor === 1 ? {eigen: schwarz, fremd: weiss} : {eigen: weiss, fremd: schwarz};
+}
 function gebietSagtVerloren(board, aiColor) {
   const marge = PARAMS.resignAreaMargin;
   _aufgabeQRufe++;
   if (marge < 0) return true;
-  const g = aufgabeGebiet(board, aiColor);
+  const g = aufgabeEinfluss(board, aiColor);
   const eigen = g.eigen + (aiColor === 2 ? AUFGABE_KOMI : 0);
   const fremd = g.fremd + (aiColor === 1 ? AUFGABE_KOMI : 0);
   const verloren = eigen < fremd - marge;
@@ -4039,7 +4049,7 @@ globalThis.policyNet = new PolicyNet();
         {key:'resignQ', label:'Aufgabe-Q', step:0.01, min:0.5, max:1, float:true,
          tip:'Q-Schwelle (aus KI-Sicht negativ) für die Aufgabe-Serie'},
         {key:'resignAreaMargin', label:'Aufgabe-Flächenprobe', step:1, min:-1, max:100,
-         tip:'Die KI gibt nur auf, wenn sie zusätzlich nach Fläche (mit Komi, ohne beweisbar tote Steine) um mehr als diesen Wert zurückliegt. 0 = Standard. −1 = ohne Flächenprobe, nur nach Q (altes Verhalten).'},
+         tip:'Die KI gibt nur auf, wenn sie zusätzlich auf der Einflusskarte (Gebiet inklusive offener Rahmen, mit Komi, ohne beweisbar tote Steine) um mehr als diesen Wert zurückliegt. 0 = Standard. −1 = ohne Flächenprobe, nur nach Q (altes Verhalten).'},
         {key:'resignStreak', label:'Aufgabe-Serie', step:1, min:2, max:20,
          tip:'So viele KI-Züge in Folge mit Q ≤ -Schwelle → KI gibt auf. resignEnabled=0 in PARAMS schaltet ab.'},
         {key:'adaptiveBudgetTargetMinSims', label:'Ziel-Min-Sims', step:10, min:20, max:300, main:true,
