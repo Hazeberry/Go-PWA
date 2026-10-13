@@ -2,7 +2,7 @@
 
 Go auf dem 19×19-Brett gegen eine KI, als installierbare Progressive Web App.
 Nach dem ersten Aufruf läuft das Spiel komplett offline.
-
+https://hazeberry.github.io/Go-PWA/
 ## Dateien
 
 | Datei | Zweck |
