@@ -12,6 +12,7 @@ https://hazeberry.github.io/Go-PWA/
 | `sw.js` | Service Worker: speichert die App für den Offline-Betrieb |
 | `icons/` | App-Icons (SVG-Vorlage plus PNGs) |
 | `tests/endzaehlung.js` | Prüft die Totstein-Erkennung am Spielende (`node tests/endzaehlung.js`) |
+| `tests/lizenz.js` | Prüft Lizenzhinweise, Required Notice und Projektkennung (`node tests/lizenz.js`) |
 
 ## Spielende und tote Steine
 
@@ -96,7 +97,9 @@ Installierte Apps laden die neue Version im Hintergrund und zeigen sie beim näc
 
 [PolyForm Noncommercial 1.0.0](LICENSE.md)
 
-Projektkennung: `hzb-go-7f3a91c2`. Sie steht im Kopfkommentar und in einem Meta-Tag von `index.html`, in `sw.js`,
+Projektkennung: `hzb-go-7f3a91c2`. Sie steht im Kopfkommentar, in einem Meta-Tag und als Konstante
+`PROJEKT_KENNUNG` in `index.html`, im Kopf von `sw.js`, in der Browser-Konsole beim Start,
 im Bug-Report (`kennung`) und in exportierten SGF-Dateien (`AP[Go-PWA:hzb-go-7f3a91c2]`).
+`tests/lizenz.js` prüft, dass sie überall gleich ist.
 Kopien und Ableitungen lassen sich damit finden, etwa über die
 [GitHub-Codesuche](https://github.com/search?q=%22hzb-go-7f3a91c2%22&type=code).
