@@ -89,9 +89,14 @@ python3 -m http.server 8000
 
 ## Updates
 
-Nach Änderungen an den App-Dateien `CACHE_VERSION` in `sw.js` erhöhen (aktuell `v8`).
+Nach Änderungen an den App-Dateien `CACHE_VERSION` in `sw.js` erhöhen (aktuell `v9`).
 Installierte Apps laden die neue Version im Hintergrund und zeigen sie beim nächsten Start.
 
 ## Lizenz
 
 [PolyForm Noncommercial 1.0.0](LICENSE.md)
+
+Projektkennung: `hzb-go-7f3a91c2`. Sie steht im Kopfkommentar und in einem Meta-Tag von `index.html`, in `sw.js`,
+im Bug-Report (`kennung`) und in exportierten SGF-Dateien (`AP[Go-PWA:hzb-go-7f3a91c2]`).
+Kopien und Ableitungen lassen sich damit finden, etwa über die
+[GitHub-Codesuche](https://github.com/search?q=%22hzb-go-7f3a91c2%22&type=code).
