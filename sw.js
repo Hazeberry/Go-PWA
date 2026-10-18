@@ -1,9 +1,13 @@
+/* Go – 囲碁 · Copyright (c) 2026 Hazeberry (https://github.com/Hazeberry)
+   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+   https://polyformproject.org/licenses/noncommercial/1.0.0 */
+
 /* Service Worker für Go – 囲碁.
    App-Dateien werden beim Installieren vorgeladen; danach kommt alles
    sofort aus dem Cache und wird im Hintergrund aktualisiert
    (stale-while-revalidate). Neue Versionen greifen beim nächsten Start.
    Bei Änderungen an den App-Dateien CACHE_VERSION erhöhen. */
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const APP_CACHE = `go-app-${CACHE_VERSION}`;
 
 const APP_FILES = [
