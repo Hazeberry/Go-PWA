@@ -89,7 +89,7 @@ python3 -m http.server 8000
 
 ## Updates
 
-Nach Änderungen an den App-Dateien `CACHE_VERSION` in `sw.js` erhöhen (aktuell `v4`).
+Nach Änderungen an den App-Dateien `CACHE_VERSION` in `sw.js` erhöhen (aktuell `v6`).
 Installierte Apps laden die neue Version im Hintergrund und zeigen sie beim nächsten Start.
 
 ## Lizenz

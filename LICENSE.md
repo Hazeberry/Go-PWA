@@ -2,7 +2,7 @@
 
 <https://polyformproject.org/licenses/noncommercial/1.0.0>
 
-Required Notice: Copyright (c) 2026 Hazeberry (https://github.com/Hazeberry)
+Required Notice: Copyright (c) 2026 Hazeberry (https://github.com/Hazeberry/Go-PWA)
 
 ## Acceptance
 
