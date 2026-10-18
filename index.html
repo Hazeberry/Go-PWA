@@ -2436,7 +2436,8 @@ function getAIMove(board, aiColor, histHashes, captures, mc, diff, reqId, koPoin
 'use strict';
 
 const KOMI = 7.5;
-const KENNUNG = 'hzb-go-7f3a91c2';
+const PROJEKT_KENNUNG = 'hzb-go-7f3a91c2';
+console.info(`Go – 囲碁 · © 2026 Hazeberry · PolyForm Noncommercial 1.0.0 · Quelle: https://github.com/Hazeberry/Go-PWA · ${PROJEKT_KENNUNG}`);
 const state = {
   board: createBoard(), currentPlayer: 1, captures: {1:0,2:0},
   boardHistory: new Set([computeZobrist(createBoard())]),
@@ -2972,7 +2973,7 @@ function buildSGF() {
     if (state.aiColor === 1) pb = tag; else pw = tag;
   }
 
-  let head = `(;GM[1]FF[4]CA[UTF-8]AP[Go-PWA:${KENNUNG}]SZ[${SIZE}]KM[${KOMI}]RU[${rules}]`
+  let head = `(;GM[1]FF[4]CA[UTF-8]AP[Go-PWA:${PROJEKT_KENNUNG}]SZ[${SIZE}]KM[${KOMI}]RU[${rules}]`
            + `PB[${esc(pb)}]PW[${esc(pw)}]DT[${dt}]`;
 
   if (state.resignedBy) {
@@ -3334,7 +3335,7 @@ function buildBugReport() {
   rows.push('   ' + COL_LETTERS.split('').join(' '));
   return JSON.stringify({
     meta: {
-      kennung:    KENNUNG,
+      kennung:    PROJEKT_KENNUNG,
       erstellt:   new Date().toISOString(),
       userAgent:  navigator.userAgent,
       zug:        state.moveCount,
